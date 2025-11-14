@@ -1,13 +1,14 @@
-# torch / torchvision은 Colab 환경에 맞춰 따로 설치
-# (requirements에서는 관리하지 않음)
+# torch / torchvision은 Colab에서 따로 설치
 
-transformers==4.18.0
+# transformers는 옛날 4.18.0 대신, Colab/Py3.12와 잘 맞는 최신 계열 사용
+transformers>=4.40.0
+
 tensorboard==2.9.1
 pytorch-lightning==1.6.4
 timm==0.5.4
 pycocotools==2.0.5
 ninja==1.10.2
 
-# 아래 둘은 Colab의 Python 버전이랑 충돌날 수 있어서 버전 고정을 풀자
+# 버전 고정은 풀어두는 게 안전
 matplotlib
 pandas
