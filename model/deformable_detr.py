@@ -28,6 +28,8 @@
 # limitations under the License.
 """ PyTorch Deformable DETR model."""
 
+import os
+os.environ["TRANSFORMERS_NO_TF"] = "1"
 
 import copy
 import importlib
