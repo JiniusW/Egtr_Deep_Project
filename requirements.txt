@@ -1,12 +1,27 @@
-# torch / torchvision 은 따로 설치
+# ===== Core PyTorch stack =====
+torch>=2.3.0
+torchvision>=0.18.0
 
-numpy<2.0.0
-transformers>=4.40.0
-tensorboard==2.9.1
-pytorch-lightning==1.6.4
-timm==0.5.4
-pycocotools==2.0.5
-ninja==1.10.2
+# ===== Training / utilities =====
+pytorch-lightning>=2.2.0
+timm>=0.9.0
 
-matplotlib
-pandas
+# ===== HuggingFace (DETR 등) =====
+transformers>=4.40.0,<5.0.0
+
+# ===== Detection / COCO tools =====
+pycocotools>=2.0.7
+ninja>=1.10.2
+cython>=3.0.0
+
+# ===== Plotting / data handling =====
+matplotlib>=3.8.0
+pandas>=2.0.0
+
+# ===== 이미지 관련 (보통 Colab에 이미 있지만 명시해도 무방) =====
+Pillow>=9.0.0
+opencv-python>=4.8.0
+
+# ===== (중요) 굳이 건드리지 않는 것들 =====
+# - numpy : Colab 기본 2.x 그대로 사용 (우리가 코드에서 호환 패치함)
+# - protobuf / tensorflow : 여기서 버전 고정 안 함 (Colab 기본값 그대로)
