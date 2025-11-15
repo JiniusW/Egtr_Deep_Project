@@ -21,8 +21,8 @@ try:
 except AttributeError:
     np.bool8 = bool
 
-DTYPE = np.float
-ctypedef np.float_t DTYPE_t
+DTYPE = np.64float
+ctypedef np.64float_t DTYPE_t
 
 def bbox_overlaps(boxes, query_boxes):
     cdef np.ndarray[DTYPE_t, ndim=2] boxes_contig = np.ascontiguousarray(boxes, dtype=DTYPE)
