@@ -66,6 +66,25 @@ from .util import generalized_box_iou, sigmoid_focal_loss
 
 logger = logging.get_logger(__name__)
 
+# 추가
+def center_to_corners_format(boxes):
+    """
+    Convert bounding boxes from [cx, cy, w, h] format
+    to [x_min, y_min, x_max, y_max] format.
+
+    boxes: Tensor or array-like, shape (..., 4)
+    """
+    # 리스트/넘파이도 그냥 텐서로 변환해서 처리
+    if not isinstance(boxes, torch.Tensor):
+        boxes = torch.as_tensor(boxes)
+
+    cx, cy, w, h = boxes.unbind(-1)
+    x0 = cx - 0.5 * w
+    y0 = cy - 0.5 * h
+    x1 = cx + 0.5 * w
+    y1 = cy + 0.5 * h
+    return torch.stack([x0, y0, x1, y1], dim=-1)
+
 
 def is_ninja_available():
     return importlib.util.find_spec("ninja") is not None
@@ -459,12 +478,12 @@ class MultiScaleDeformableAttentionFunction(Function):
 
 if is_scipy_available():
     from scipy.optimize import linear_sum_assignment
-
+"""
 if is_vision_available():
     from transformers.models.detr.feature_extraction_detr import (
         center_to_corners_format,
     )
-
+"""
 if is_timm_available():
     from timm import create_model
 
