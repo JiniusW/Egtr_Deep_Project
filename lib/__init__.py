@@ -13,19 +13,27 @@ if "tensorflow" not in sys.modules:
     sys.modules["tensorflow"] = dummy_tf
 # --------------------------------
 
-# ---- torchao dummy 주입 ----
-# transformers.quantizers 가 "import torchao" 할 때
-# 실제 torchao 패키지를 로딩하지 않고, 이 더미 모듈을 사용하게 만든다.
+# ---- torchao dummy 주입 (여기 부분을 새로/수정) ----
+class DummyQuantization:
+    """torchao.quantization.* 에 접근할 때마다
+    요청된 이름으로 비어 있는 더미 클래스를 만들어 주는 객체.
+    """
+    def __getattr__(self, name):
+        Dummy = type(name, (), {})  # 예: class Float8WeightOnlyConfig: pass
+        setattr(self, name, Dummy)  # 다음부터는 캐시된 걸 사용
+        return Dummy
+
 if "torchao" not in sys.modules:
     dummy_torchao = types.ModuleType("torchao")
     dummy_torchao.__dict__["__version__"] = "0.0.0"
-    # quantizer_torchao 안에서 참조할 수 있는 서브모듈 이름만 대충 만들어 둔다.
-    import types as _types
-    dummy_torchao.quantization = _types.SimpleNamespace()
-    dummy_torchao.dtypes = _types.SimpleNamespace()
-    dummy_torchao.ops = _types.SimpleNamespace()
+
+    # quantization, dtypes, ops 같은 네임스페이스도 미리 만들어 둔다
+    dummy_torchao.quantization = DummyQuantization()
+    dummy_torchao.dtypes = DummyQuantization()
+    dummy_torchao.ops = DummyQuantization()
+
     sys.modules["torchao"] = dummy_torchao
-# --------------------------------
+# --------------------------------------------------------------
 
 import numpy as np
 
