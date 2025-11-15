@@ -9,6 +9,24 @@ cimport cython
 import numpy as np
 cimport numpy as np
 
+# 최신 NumPy에서 삭제된 옛날 alias들을 복구해서
+# bbox 모듈 초기화 시점에 np.float 등이 존재하도록 만든다.
+if not hasattr(np, "float"):
+    np.float = float
+if not hasattr(np, "int"):
+    np.int = int
+if not hasattr(np, "bool"):
+    np.bool = bool
+if not hasattr(np, "object"):
+    np.object = object
+if not hasattr(np, "long"):
+    np.long = int
+if not hasattr(np, "bool8"):
+    try:
+        np.bool8 = np.bool_
+    except AttributeError:
+        np.bool8 = bool
+
 DTYPE = np.float
 ctypedef np.float_t DTYPE_t
 
