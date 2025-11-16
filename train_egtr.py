@@ -19,6 +19,17 @@ from pytorch_lightning.strategies.ddp import DDPStrategy
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.utils.data import DataLoader
 
+import transformers
+from transformers.utils import generic as transformers_generic
+from transformers.utils import import_utils as transformers_import_utils
+
+# ---- Colab의 불완전한 TensorFlow 때문에 생기는 에러를 막기 위한 패치 ----
+# 무조건 "TensorFlow는 없다" 라고 간주하게 만든다.
+transformers_import_utils.is_tf_available = lambda: False
+
+# 그리고 "이건 TF 텐서냐?" 라는 체크도 항상 False를 반환하게 만든다.
+transformers_generic.is_tf_tensor = lambda x: False
+
 from data.open_image import OIDataset, oi_get_statistics
 from data.visual_genome import VGDataset, vg_get_statistics
 from lib.evaluation.coco_eval import CocoEvaluator
@@ -735,7 +746,7 @@ if __name__ == "__main__":
         version = None  #  If version is not specified the logger inspects the save directory for existing versions, then automatically assigns the next available version.
 
     # Trainer setting
-    logger = CSVLogger(save_dir, name=f"{name}__finetune", version=version)
+    logger = CSVLogger(save_dir, name=name, version=version)
     if os.path.exists(f"{logger.log_dir}/checkpoints"):
         if os.path.exists(f"{logger.log_dir}/checkpoints/last.ckpt"):
             ckpt_path = f"{logger.log_dir}/checkpoints/last.ckpt"
@@ -809,7 +820,6 @@ if __name__ == "__main__":
             # GPU / CPU 설정
 
             trainer = Trainer(
-                accelerator=accelerator,
                 devices=1,
                 precision=args.precision,
                 logger=logger,
@@ -831,10 +841,15 @@ if __name__ == "__main__":
                 print(e)
 
         if args.finetune:
-            ckpt_path = sorted(  # load best model
-                glob(f"{logger.log_dir}/checkpoints/epoch=*.ckpt"),
-                key=lambda x: int(x.split("epoch=")[1].split("-")[0]),
-            )[-1]
+            ckpt_dir = Path(logger.log_dir) / "checkpoints"
+            ckpt_files = list(ckpt_dir.glob("*.ckpt"))
+
+            if len(ckpt_files) == 0:
+                # 아직 학습한 적이 없거나, 체크포인트가 없는 상태
+                ckpt_path = None
+            else:
+                ckpt_files = sorted(ckpt_files, key=os.path.getmtime)
+                ckpt_path = str(ckpt_files[-1])
 
             # Finetune trainer setting
             logger = CSVLogger(
@@ -901,11 +916,12 @@ if __name__ == "__main__":
                 precision=args.precision,
                 logger=logger,
                 max_epochs=args.max_epochs_finetune,
-                gpus=args.gpus,
                 gradient_clip_val=args.gradient_clip_val,
                 strategy=DDPStrategy(find_unused_parameters=False),
                 callbacks=[checkpoint_callback, early_stop_callback],
                 accumulate_grad_batches=args.accumulate,
+                accelerator="gpu" if torch.cuda.is_available() else "cpu",
+                devices=1,
             )
             use_deterministic_algorithms()
             if trainer.is_global_zero:
@@ -922,7 +938,7 @@ if __name__ == "__main__":
     # Evaluation
     if args.eval_when_train_end and (trainer is None or trainer.is_global_zero):
         if args.skip_train and args.finetune:
-            logger = TensorBoardLogger(
+            logger = CSVLogger(
                 save_dir, name=f"{name}__finetune", version=version
             )
 
@@ -937,8 +953,10 @@ if __name__ == "__main__":
         module.model.load_state_dict(state_dict)  # load best model
 
         # Eval
+        num_devices = 1 if torch.cuda.is_available() else 0
+
         trainer = Trainer(
-            precision=args.precision, logger=logger, gpus=1, max_epochs=-1
+            precision=args.precision, logger=logger,  max_epochs=-1, accelerator="gpu" if torch.cuda.is_available() else "cpu", devices=num_devices,
         )
         if "visual_genome" in args.data_path:
             test_dataset = VGDataset(
