@@ -133,11 +133,22 @@ class DetrForSceneGraphGeneration(DeformableDetrPreTrainedModel):
             num_layers=3,
         )
 
+         # ---- 여기부터 수정 ----
         prior_prob = 0.01
         bias_value = -math.log((1 - prior_prob) / prior_prob)
-        self.class_embed.bias.data = torch.ones(config.num_labels) * bias_value
-        nn.init.constant_(self.bbox_embed.layers[-1].weight.data, 0)
-        nn.init.constant_(self.bbox_embed.layers[-1].bias.data, 0)
+
+        # meta tensor면 건너뛰고, 실제 텐서일 때만 초기화
+        class_bias = self.class_embed.bias
+        if not getattr(class_bias, "is_meta", False):
+            with torch.no_grad():
+                # bias와 같은 dtype/device/shape 로 상수 텐서 생성
+                class_bias.copy_(class_bias.new_full(class_bias.shape, bias_value))
+
+        # .data 대신 바로 파라미터에 init + no_grad
+        with torch.no_grad():
+            nn.init.constant_(self.bbox_embed.layers[-1].weight, 0.0)
+            nn.init.constant_(self.bbox_embed.layers[-1].bias, 0.0)
+        # ---- 여기까지 수정 ----
 
         # if two-stage, the last class_embed and bbox_embed is for region proposal generation
         num_pred = (

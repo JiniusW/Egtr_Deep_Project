@@ -14,7 +14,7 @@ import torch
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.loggers import CSVLogger
 from pytorch_lightning.strategies.ddp import DDPStrategy
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.utils.data import DataLoader
@@ -226,6 +226,9 @@ class SGG(pl.LightningModule):
     ):
 
         super().__init__()
+        # --- 추가: validation/test용 임시 버퍼 ---
+        self.validation_step_outputs = []
+
         # replace COCO classification head with custom head
         config = DeformableDetrConfig.from_pretrained(pretrained)
         config.architecture = architecture
@@ -330,22 +333,52 @@ class SGG(pl.LightningModule):
         self.log_dict(log_dict)
         return loss
 
+    # --------------------- 여기부터 Lightning 2.x 스타일 --------------------- #
     def validation_step(self, batch, batch_idx):
+        """
+        Lightning 2.x에서는 validation_step의 반환값을 validation_epoch_end에서
+        받는 방식이 사라져서, 내부 버퍼(self.validation_step_outputs)에 저장해 둔다.
+        """
         loss, loss_dict = self.common_step(batch, batch_idx)
-        loss_dict["loss"] = loss
-        del loss
-        return loss_dict
+        loss_dict["loss"] = loss.detach()
 
-    def validation_epoch_end(self, outputs):
+        # CPU 텐서로 복사해서 쌓아두기 (메모리 폭발 방지용 detach+cpu)
+        step_out = {k: v.detach().cpu() for k, v in loss_dict.items()}
+        self.validation_step_outputs.append(step_out)
+
+        # 원하면 per-step log도 가능하지만, 필요 없으면 생략해도 됨
+        # self.log_dict({f"validation_{k}": v for k, v in loss_dict.items()},
+        #               on_step=False, on_epoch=False)
+
+        # Lightning 2 스타일에서는 굳이 뭔가를 return 할 필요 없음
+        return
+
+    def on_validation_epoch_end(self):
+        """
+        기존 validation_epoch_end(outputs)를 대체.
+        self.validation_step_outputs에 쌓아둔 것들을 사용해서 epoch 통계 계산.
+        """
+        if len(self.validation_step_outputs) == 0:
+            return
+
         log_dict = {
             "step": torch.tensor(self.global_step, dtype=torch.float32),
             "epoch": torch.tensor(self.current_epoch, dtype=torch.float32),
         }
-        for k in outputs[0].keys():
-            log_dict[f"validation_" + k] = (
-                torch.stack([x[k] for x in outputs]).mean().item()
-            )
+
+        # 이전 코드: for k in outputs[0].keys(): ...
+        keys = self.validation_step_outputs[0].keys()
+        for k in keys:
+            stacked = torch.stack(
+                [x[k] for x in self.validation_step_outputs]
+            )  # 각 step의 값 모아서 평균
+            log_dict[f"validation_{k}"] = stacked.mean().item()
+
+        # epoch 단위로 로깅
         self.log_dict(log_dict, on_epoch=True)
+
+        # 버퍼 비우기 (다음 epoch를 위해)
+        self.validation_step_outputs.clear()
 
     @rank_zero_only
     def on_train_start(self) -> None:
@@ -387,7 +420,11 @@ class SGG(pl.LightningModule):
                 }
                 self.coco_evaluator.update(res)
 
-    def test_epoch_end(self, outputs):
+    def on_test_epoch_end(self):
+        """
+        Lightning 2.x에서는 test_epoch_end(outputs) 대신 on_test_epoch_end() 사용.
+        원래도 outputs 인자를 안 쓰고 있었으니 그대로 옮겨오면 됨.
+        """
         log_dict = {}
         # log OD
         if self.coco_evaluator is not None:
@@ -422,6 +459,7 @@ class SGG(pl.LightningModule):
             log_dict.update(metrics)
         self.log_dict(log_dict, on_epoch=True)
         return log_dict
+    # ----------------------------------------------------------------------- #
 
     def configure_optimizers(self):
         diff_lr_params = ["backbone", "reference_points", "sampling_offsets"]
@@ -697,7 +735,7 @@ if __name__ == "__main__":
         version = None  #  If version is not specified the logger inspects the save directory for existing versions, then automatically assigns the next available version.
 
     # Trainer setting
-    logger = TensorBoardLogger(save_dir, name=name, version=version)
+    logger = CSVLogger(save_dir, name=f"{name}__finetune", version=version)
     if os.path.exists(f"{logger.log_dir}/checkpoints"):
         if os.path.exists(f"{logger.log_dir}/checkpoints/last.ckpt"):
             ckpt_path = f"{logger.log_dir}/checkpoints/last.ckpt"
@@ -759,18 +797,23 @@ if __name__ == "__main__":
 
     # Train
     trainer = None
+    logger = CSVLogger(
+        save_dir,
+        name=f"{name}__finetune",
+        version=version,
+    )
     if not args.skip_train:
         # Main training
-        if not Path(
-            TensorBoardLogger(
-                save_dir, name=f"{name}__finetune", version=version
-            ).log_dir
-        ).exists():
+        if not Path(logger.log_dir).exists():
             # Training
+            # GPU / CPU 설정
+
             trainer = Trainer(
+                accelerator=accelerator,
+                devices=1,
                 precision=args.precision,
                 logger=logger,
-                gpus=args.gpus,
+                accelerator="gpu" if torch.cuda.is_available() else "cpu",
                 max_epochs=args.max_epochs,
                 gradient_clip_val=args.gradient_clip_val,
                 strategy=DDPStrategy(find_unused_parameters=False),
@@ -794,7 +837,7 @@ if __name__ == "__main__":
             )[-1]
 
             # Finetune trainer setting
-            logger = TensorBoardLogger(
+            logger = CSVLogger(
                 save_dir, name=f"{name}__finetune", version=version
             )
             if os.path.exists(f"{logger.log_dir}/checkpoints"):

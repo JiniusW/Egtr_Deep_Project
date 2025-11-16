@@ -737,18 +737,33 @@ class DeformableDetrFrozenBatchNorm2d(nn.Module):
 
 # Copied from transformers.models.detr.modeling_detr.replace_batch_norm with Detr->DeformableDetr
 def replace_batch_norm(m, name=""):
+    # 1) 현재 모듈 m 안의 속성들 중 BatchNorm2d 찾기
     for attr_str in dir(m):
         target_attr = getattr(m, attr_str)
         if isinstance(target_attr, nn.BatchNorm2d):
-            frozen = DeformableDetrFrozenBatchNorm2d(target_attr.num_features)
-            bn = getattr(m, attr_str)
-            frozen.weight.data.copy_(bn.weight)
-            frozen.bias.data.copy_(bn.bias)
-            frozen.running_mean.data.copy_(bn.running_mean)
-            frozen.running_var.data.copy_(bn.running_var)
+            bn = target_attr
+
+            # >>> 여기서 meta tensor 방어 로직 추가 <<<
+            # meta 텐서면 아직 실제 데이터가 없다는 뜻이라, Frozen으로 교체하지 말고 건너뛰자.
+            weight = bn.weight
+            if getattr(weight, "is_meta", False):
+                # print(f"[replace_batch_norm] skip meta BN at {name}.{attr_str}")  # 디버깅용으로 필요하면 사용
+                continue
+
+            frozen = DeformableDetrFrozenBatchNorm2d(bn.num_features)
+
+            # .data 대신 no_grad 안에서 copy_ 사용하는 게 더 안전함
+            with torch.no_grad():
+                frozen.weight.copy_(bn.weight)
+                frozen.bias.copy_(bn.bias)
+                frozen.running_mean.copy_(bn.running_mean)
+                frozen.running_var.copy_(bn.running_var)
+
             setattr(m, attr_str, frozen)
-    for n, ch in m.named_children():
-        replace_batch_norm(ch, n)
+
+    # 2) 자식 모듈에 대해 재귀적으로 동일 작업 수행
+    for child_name, child in m.named_children():
+        replace_batch_norm(child, child_name)
 
 
 class DeformableDetrTimmConvEncoder(nn.Module):
