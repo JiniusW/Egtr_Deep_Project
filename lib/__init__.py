@@ -9,6 +9,20 @@ import types
 if "tensorflow" not in sys.modules:
     dummy_tf = types.ModuleType("tensorflow")
     dummy_tf.__dict__["__version__"] = "0.0.0"
+
+    class DummyTensor:
+        pass
+
+    dummy_tf.Tensor = DummyTensor
+
+    # (예전에 tf.io.gfile.join 관련 에러를 봤다면, 아래처럼 io/gfile도 미리 만들어 둘 수 있음)
+    dummy_tf.io = types.SimpleNamespace(
+        gfile=types.SimpleNamespace(
+            join=lambda *args, **kwargs: ""
+        )
+    )
+
+    dummy_tf.__dict__["__version__"] = "0.0.0"
     # 필요하면 나중에 tf.image 같은 서브모듈도 여기에 추가로 붙일 수 있음.
     sys.modules["tensorflow"] = dummy_tf
 # --------------------------------

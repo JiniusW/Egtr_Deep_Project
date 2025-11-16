@@ -184,16 +184,47 @@ def evaluate_batch(
             oi_evaluator(gt_entry, pred_entry)
 
 
-def collate_fn(batch, feature_extractor):
-    pixel_values = [item[0] for item in batch]
-    encoding = feature_extractor.pad_and_create_pixel_mask(
-        pixel_values, return_tensors="pt"
+def collate_fn(batch, feature_extractor=None):
+
+    # 1) 각 sample에서 pixel_values와 labels 꺼내기
+    pixel_values_list = [item["pixel_values"] for item in batch]
+    labels = [item["labels"] for item in batch]
+
+    # pixel_values_list: list of (C, H, W) tensor
+    # 2) batch 안에서 최대 높이/폭 구하기
+    max_h = max(img.shape[1] for img in pixel_values_list)
+    max_w = max(img.shape[2] for img in pixel_values_list)
+
+    batch_size = len(pixel_values_list)
+    channels = pixel_values_list[0].shape[0]
+    dtype = pixel_values_list[0].dtype
+    device = pixel_values_list[0].device
+
+    # 3) 패딩된 pixel_values와 pixel_mask 텐서 초기화
+    pixel_values = torch.zeros(
+        (batch_size, channels, max_h, max_w),
+        dtype=dtype,
+        device=device,
     )
-    labels = [item[1] for item in batch]
-    batch = {}
-    batch["pixel_values"] = encoding["pixel_values"]
-    batch["pixel_mask"] = encoding["pixel_mask"]
-    batch["labels"] = labels
+    # DETR 계열에서는 일반적으로 mask == False (0)가 실제 영역, True (1)가 padding 영역
+    pixel_mask = torch.ones(
+        (batch_size, max_h, max_w),
+        dtype=torch.bool,
+        device=device,
+    )
+
+    # 4) 각 이미지 복사 + mask 갱신
+    for i, img in enumerate(pixel_values_list):
+        c, h, w = img.shape
+        pixel_values[i, :, :h, :w] = img
+        pixel_mask[i, :h, :w] = False  # 실제 픽셀 위치는 False (non-pad)
+
+    # 5) 모델이 기대하는 형태로 dict 구성
+    batch = {
+        "pixel_values": pixel_values,
+        "pixel_mask": pixel_mask,
+        "labels": labels,
+    }
     return batch
 
 
